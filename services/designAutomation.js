@@ -48,11 +48,11 @@ function createScript({ handle, mode, x, y, angle, rotationBaseX, rotationBaseY 
 
     return [
         '(vl-load-com)',
-        '(setq doc (vla-get-activedocument (vlax-get-acad-object)))',
         '(setq ent (handent "' + safeHandle.toUpperCase() + '"))',
         '(if ent',
         '  (progn',
         '    (setq obj (vlax-ename->vla-object ent))',
+        '    (setq doc (vla-get-document obj))',
         moveMode === 'absolute'
             ? `    (setq bboxMin (vlax-make-safearray vlax-vbDouble '(0 . 2)))`
             : '    (setq moveFrom (vlax-3d-point 0 0 0))',
