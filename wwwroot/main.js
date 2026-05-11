@@ -1,9 +1,13 @@
 import { initViewer, loadModel } from './viewer.js';
+import { setupObjectEditor } from './editor.js';
 
 initViewer(document.getElementById('preview')).then(viewer => {
     const urn = window.location.hash?.substring(1);
     setupModelSelection(viewer, urn);
     setupModelUpload(viewer);
+    setupObjectEditor(viewer, () => window.location.hash?.substring(1), model => {
+        setupModelSelection(viewer, model.urn);
+    });
 });
 
 async function setupModelSelection(viewer, selectedUrn) {
