@@ -2,6 +2,7 @@ const express = require('express');
 const { APS_BUCKET } = require('../config.js');
 const { runDwgTransform, getWorkItemStatus } = require('../services/designAutomation.js');
 const { translateObject, urnify } = require('../services/aps.js');
+const { createEditedObjectName, decodeObjectName } = require('../services/modelNames.js');
 
 function parseObjectId(urn) {
     const padded = urn + '='.repeat((4 - urn.length % 4) % 4);
@@ -15,19 +16,11 @@ function parseObjectId(urn) {
     if (slashIndex === -1) {
         throw new Error('Could not parse object key from model URN.');
     }
+    const objectName = objectPath.substring(slashIndex + 1);
     return {
         objectId,
-        objectName: objectPath.substring(slashIndex + 1)
+        objectName: decodeObjectName(objectName)
     };
-}
-
-function createOutputObjectName(inputObjectName) {
-    const dotIndex = inputObjectName.lastIndexOf('.');
-    const timestamp = new Date().toISOString().replace(/[-:.TZ]/g, '').substring(0, 14);
-    if (dotIndex === -1) {
-        return `${inputObjectName}_edited_${timestamp}.dwg`;
-    }
-    return `${inputObjectName.substring(0, dotIndex)}_edited_${timestamp}${inputObjectName.substring(dotIndex)}`;
 }
 
 function validateTransform(body) {
@@ -62,7 +55,7 @@ router.post('/api/models/:urn/edits', async function (req, res, next) {
     try {
         const transform = validateTransform(req.body);
         const { objectName } = parseObjectId(req.params.urn);
-        const outputObjectName = createOutputObjectName(objectName);
+        const outputObjectName = createEditedObjectName(objectName);
         const status = await runDwgTransform({
             inputObjectName: objectName,
             outputObjectName,
@@ -96,14 +89,14 @@ router.get('/api/edits/:workItemId', async function (req, res, next) {
             reportUrl: status.reportUrl
         };
         if (status.status === 'success') {
-            const outputObjectId = `urn:adsk.objects:os.object:${APS_BUCKET}/${edit.outputObjectName}`;
+            const outputObjectId = `urn:adsk.objects:os.object:${APS_BUCKET}/${encodeURIComponent(edit.outputObjectName)}`;
             const urn = urnify(outputObjectId);
             if (!edit.translated) {
                 await translateObject(urn);
                 edit.translated = true;
             }
             response.model = {
-                name: edit.outputObjectName,
+                name: decodeObjectName(edit.outputObjectName),
                 urn
             };
         }
