@@ -37,13 +37,23 @@ function validateTransform(body) {
         y: normalizeNumber(body.y),
         angle: normalizeNumber(body.angle),
         rotationBaseX: normalizeNumber(body.rotationBaseX),
-        rotationBaseY: normalizeNumber(body.rotationBaseY)
+        rotationBaseY: normalizeNumber(body.rotationBaseY),
+        moveDeltaX: normalizeOptionalNumber(body.moveDeltaX),
+        moveDeltaY: normalizeOptionalNumber(body.moveDeltaY)
     };
 }
 
 function normalizeNumber(value) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeOptionalNumber(value) {
+    if (value === undefined || value === null) {
+        return undefined;
+    }
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 const router = express.Router();

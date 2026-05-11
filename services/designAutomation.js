@@ -37,7 +37,7 @@ function getQualifiedActivityId() {
     return `${getNickname()}.${ACTIVITY_ID}+${ACTIVITY_ALIAS}`;
 }
 
-function createScript({ handle, mode, x, y, angle, rotationBaseX, rotationBaseY }) {
+function createScript({ handle, mode, x, y, angle, rotationBaseX, rotationBaseY, moveDeltaX, moveDeltaY }) {
     const safeHandle = String(handle || '').replace(/[^0-9A-Z]/gi, '');
     const moveMode = mode === 'absolute' ? 'absolute' : 'relative';
     const moveX = Number.isFinite(Number(x)) ? Number(x) : 0;
@@ -45,50 +45,27 @@ function createScript({ handle, mode, x, y, angle, rotationBaseX, rotationBaseY 
     const rotateAngle = Number.isFinite(Number(angle)) ? Number(angle) : 0;
     const baseX = Number.isFinite(Number(rotationBaseX)) ? Number(rotationBaseX) : 0;
     const baseY = Number.isFinite(Number(rotationBaseY)) ? Number(rotationBaseY) : 0;
+    const deltaX = Number.isFinite(Number(moveDeltaX)) ? Number(moveDeltaX) : moveMode === 'absolute' ? moveX - baseX : moveX;
+    const deltaY = Number.isFinite(Number(moveDeltaY)) ? Number(moveDeltaY) : moveMode === 'absolute' ? moveY - baseY : moveY;
+    const shouldMove = deltaX !== 0 || deltaY !== 0;
+    const shouldRotate = rotateAngle !== 0;
+    const shouldChange = shouldMove || shouldRotate;
 
     return [
-        '(vl-load-com)',
-        '(setq ent (handent "' + safeHandle + '"))',
-        '(if ent',
-        '  (progn',
-        '    (setq obj (vlax-ename->vla-object ent))',
-        moveMode === 'absolute'
-            ? `    (setq bboxMin (vlax-make-safearray vlax-vbDouble '(0 . 2)))`
-            : '    (setq moveFrom (vlax-3d-point 0 0 0))',
-        moveMode === 'absolute'
-            ? `    (setq bboxMax (vlax-make-safearray vlax-vbDouble '(0 . 2)))`
-            : `    (setq moveTo (vlax-3d-point ${moveX} ${moveY} 0))`,
-        moveMode === 'absolute'
-            ? '    (vla-getboundingbox obj \'bboxMin \'bboxMax)'
-            : '    (vla-move obj moveFrom moveTo)',
-        moveMode === 'absolute'
-            ? '    (setq minPt (vlax-safearray->list bboxMin))'
+        '(setq ent (handent "' + safeHandle.toUpperCase() + '"))',
+        '(if (not ent) (vl-exit-with-error "DWG_EDIT_ENTITY_NOT_FOUND"))',
+        shouldChange ? '(setq before (entget ent))' : '',
+        '(setq ss (ssadd ent))',
+        shouldMove
+            ? `(command "_.MOVE" ss "" (list 0 0 0) (list ${deltaX} ${deltaY} 0))`
             : '',
-        moveMode === 'absolute'
-            ? '    (setq maxPt (vlax-safearray->list bboxMax))'
+        shouldRotate
+            ? `(command "_.ROTATE" ss "" (list ${baseX} ${baseY} 0) ${rotateAngle})`
             : '',
-        moveMode === 'absolute'
-            ? '    (setq currentX (/ (+ (car minPt) (car maxPt)) 2.0))'
-            : '',
-        moveMode === 'absolute'
-            ? '    (setq currentY (/ (+ (cadr minPt) (cadr maxPt)) 2.0))'
-            : '',
-        moveMode === 'absolute'
-            ? `    (setq moveFrom (vlax-3d-point currentX currentY 0))`
-            : '',
-        moveMode === 'absolute'
-            ? `    (setq moveTo (vlax-3d-point ${moveX} ${moveY} 0))`
-            : '',
-        moveMode === 'absolute'
-            ? '    (vla-move obj moveFrom moveTo)'
-            : '',
-        rotateAngle
-            ? `    (vla-rotate obj (vlax-3d-point ${baseX} ${baseY} 0) (* pi (/ ${rotateAngle} 180.0)))`
-            : '',
-        '    (vla-save (vla-get-activedocument (vlax-get-acad-object)))',
-        '  )',
-        ')',
-        '_SAVEAS',
+        shouldChange ? '(setq after (entget ent))' : '',
+        shouldChange ? '(if (equal before after) (vl-exit-with-error "DWG_EDIT_ENTITY_UNCHANGED"))' : '',
+        '_.REGEN',
+        '_.SAVEAS',
         '2018',
         'output.dwg',
         '_QUIT'
