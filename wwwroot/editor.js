@@ -9,9 +9,15 @@ export function setupObjectEditor(viewer, getCurrentUrn, onModelReady) {
             panel.hide();
             return;
         }
-        selected = await getSelectedObject(viewer, dbIds[0]);
-        if (selected) {
-            panel.setSelectedObject(selected);
+        try {
+            selected = await getSelectedObject(viewer, dbIds[0]);
+            if (selected) {
+                panel.setSelectedObject(selected);
+            }
+        } catch (err) {
+            selected = null;
+            panel.setBusy(err.message);
+            console.error(err);
         }
     });
 
@@ -25,15 +31,13 @@ export function setupObjectEditor(viewer, getCurrentUrn, onModelReady) {
                 {
                     title: '위치이동',
                     target: async () => {
-                        selected = await getSelectedObject(viewer, viewer.getSelection()[0]);
-                        panel.open('move', selected);
+                        await openEditor(viewer, panel, 'move', selectedObject => selected = selectedObject);
                     }
                 },
                 {
                     title: '회전',
                     target: async () => {
-                        selected = await getSelectedObject(viewer, viewer.getSelection()[0]);
-                        panel.open('rotate', selected);
+                        await openEditor(viewer, panel, 'rotate', selectedObject => selected = selectedObject);
                     }
                 }
             ]
@@ -70,6 +74,17 @@ export function setupObjectEditor(viewer, getCurrentUrn, onModelReady) {
     };
 }
 
+async function openEditor(viewer, panel, mode, setSelected) {
+    try {
+        const selected = await getSelectedObject(viewer, viewer.getSelection()[0]);
+        setSelected(selected);
+        panel.open(mode, selected);
+    } catch (err) {
+        panel.setBusy(err.message);
+        console.error(err);
+    }
+}
+
 async function pollWorkItem(workItemId, panel, onModelReady) {
     while (true) {
         await new Promise(resolve => setTimeout(resolve, 5000));
@@ -92,6 +107,8 @@ async function pollWorkItem(workItemId, panel, onModelReady) {
 
 async function getSelectedObject(viewer, dbId) {
     const properties = await getProperties(viewer, dbId);
+    const objectType = getPropertyValue(properties, 'type');
+    validateEditableType(objectType, properties.name);
     let bounds;
     try {
         bounds = getBounds2D(viewer, dbId);
@@ -105,9 +122,10 @@ async function getSelectedObject(viewer, dbId) {
     return {
         dbId,
         handle,
+        type: objectType,
         name: properties.name || `dbId ${dbId}`,
         center: bounds.center,
-        angle: 0
+        angle: getObjectAngle(properties)
     };
 }
 
@@ -118,6 +136,10 @@ function getProperties(viewer, dbId) {
 }
 
 function getHandle(properties) {
+    const handle = getPropertyValue(properties, 'Handle');
+    if (handle) {
+        return String(handle).replace(/[^0-9A-Z]/gi, '');
+    }
     if (!properties.externalId) {
         return null;
     }
@@ -129,6 +151,30 @@ function getHandle(properties) {
     }
     const match = String(properties.externalId).match(/[0-9A-Z]+$/i);
     return match ? match[0] : null;
+}
+
+function getPropertyValue(properties, name) {
+    const prop = properties.properties?.find(item => item.displayName === name);
+    return prop ? prop.displayValue : null;
+}
+
+function validateEditableType(type, name) {
+    if (['AcDbLine', 'AcDbPolyline', 'AcDbBlockReference', 'AcDbMText'].includes(type)) {
+        return;
+    }
+    if (!type) {
+        throw new Error(`${name || '선택 객체'}의 DWG 객체 타입을 확인할 수 없습니다.`);
+    }
+    throw new Error(`${type} 객체는 아직 편집 대상이 아닙니다. Line, Polyline, BlockReference 객체를 선택해주세요.`);
+}
+
+function getObjectAngle(properties) {
+    const angle = Number(getPropertyValue(properties, 'Angle'));
+    if (Number.isFinite(angle)) {
+        return angle;
+    }
+    const rotation = Number(getPropertyValue(properties, 'Rotation'));
+    return Number.isFinite(rotation) ? rotation : 0;
 }
 
 function getBounds2D(viewer, dbId) {
@@ -224,7 +270,7 @@ function createPanel() {
             if (!selected) {
                 return;
             }
-            element.querySelector('[data-field="name"]').textContent = `${selected.name} (${selected.handle})`;
+            element.querySelector('[data-field="name"]').textContent = `${selected.name} (${selected.type}, ${selected.handle})`;
             element.querySelector('[data-field="current"]').textContent = `X ${formatNumber(selected.center.x)}, Y ${formatNumber(selected.center.y)}`;
             element.querySelector('[data-field="x"]').value = formatNumber(selected.center.x);
             element.querySelector('[data-field="y"]').value = formatNumber(selected.center.y);
