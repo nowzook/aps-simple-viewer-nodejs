@@ -37,7 +37,7 @@ function getQualifiedActivityId() {
     return `${getNickname()}.${ACTIVITY_ID}+${ACTIVITY_ALIAS}`;
 }
 
-function createScript({ handle, mode, x, y, angle, rotationBaseX, rotationBaseY }) {
+function createScript({ handle, mode, x, y, angle, rotationBaseX, rotationBaseY, moveDeltaX, moveDeltaY }) {
     const safeHandle = String(handle || '').replace(/[^0-9A-Z]/gi, '');
     const moveMode = mode === 'absolute' ? 'absolute' : 'relative';
     const moveX = Number.isFinite(Number(x)) ? Number(x) : 0;
@@ -45,9 +45,9 @@ function createScript({ handle, mode, x, y, angle, rotationBaseX, rotationBaseY 
     const rotateAngle = Number.isFinite(Number(angle)) ? Number(angle) : 0;
     const baseX = Number.isFinite(Number(rotationBaseX)) ? Number(rotationBaseX) : 0;
     const baseY = Number.isFinite(Number(rotationBaseY)) ? Number(rotationBaseY) : 0;
-    const moveDeltaX = moveMode === 'absolute' ? moveX - baseX : moveX;
-    const moveDeltaY = moveMode === 'absolute' ? moveY - baseY : moveY;
-    const shouldMove = moveDeltaX !== 0 || moveDeltaY !== 0;
+    const deltaX = Number.isFinite(Number(moveDeltaX)) ? Number(moveDeltaX) : moveMode === 'absolute' ? moveX - baseX : moveX;
+    const deltaY = Number.isFinite(Number(moveDeltaY)) ? Number(moveDeltaY) : moveMode === 'absolute' ? moveY - baseY : moveY;
+    const shouldMove = deltaX !== 0 || deltaY !== 0;
     const shouldRotate = rotateAngle !== 0;
     const shouldChange = shouldMove || shouldRotate;
 
@@ -57,7 +57,7 @@ function createScript({ handle, mode, x, y, angle, rotationBaseX, rotationBaseY 
         shouldChange ? '(setq before (entget ent))' : '',
         '(setq ss (ssadd ent))',
         shouldMove
-            ? `(command "_.MOVE" ss "" (list 0 0 0) (list ${moveDeltaX} ${moveDeltaY} 0))`
+            ? `(command "_.MOVE" ss "" (list 0 0 0) (list ${deltaX} ${deltaY} 0))`
             : '',
         shouldRotate
             ? `(command "_.ROTATE" ss "" (list ${baseX} ${baseY} 0) ${rotateAngle})`

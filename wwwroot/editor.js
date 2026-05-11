@@ -62,8 +62,10 @@ export function setupObjectEditor(viewer, getCurrentUrn, onModelReady) {
                 x: values.x,
                 y: values.y,
                 angle: values.angle,
-                rotationBaseX: selected.center.x,
-                rotationBaseY: selected.center.y
+                rotationBaseX: selected.modelCenter?.x ?? selected.center.x,
+                rotationBaseY: selected.modelCenter?.y ?? selected.center.y,
+                moveDeltaX: getModelMoveDelta(selected, values).x,
+                moveDeltaY: getModelMoveDelta(selected, values).y
             })
         });
         if (!resp.ok) {
@@ -125,6 +127,8 @@ async function getSelectedObject(viewer, dbId) {
         type: objectType,
         name: properties.name || `dbId ${dbId}`,
         center: bounds.center,
+        modelCenter: bounds.modelCenter,
+        pageToModelTransform: bounds.pageToModelTransform,
         angle: getObjectAngle(properties)
     };
 }
@@ -186,17 +190,83 @@ function getBounds2D(viewer, dbId) {
     }
     const bounds = new THREE.Box3();
     const boundsCallback = new Autodesk.Viewing.Private.BoundsCallback(bounds);
+    const cadBoundsCallback = new CadBoundsCallback(viewer);
     for (const fragId of fragIds) {
         const mesh = frags.getVizmesh(fragId);
         const vbr = new Autodesk.Viewing.Private.VertexBufferReader(mesh.geometry, viewer.impl.use2dInstancing);
         vbr.enumGeomsForObject(dbId, boundsCallback);
+        vbr.enumGeomsForObject(dbId, cadBoundsCallback);
     }
     if (bounds.isEmpty()) {
         throw new Error('선택 객체의 2D 좌표를 계산할 수 없습니다.');
     }
     const center = bounds.getCenter(new THREE.Vector3());
-    return { bounds, center };
+    return {
+        bounds,
+        center,
+        modelCenter: cadBoundsCallback.modelBounds.isEmpty()
+            ? null
+            : cadBoundsCallback.modelBounds.getCenter(new THREE.Vector3()),
+        pageToModelTransform: cadBoundsCallback.pageToModelTransform
+    };
 }
+
+function getModelMoveDelta(selected, values) {
+    if (!selected.pageToModelTransform || !selected.modelCenter) {
+        return {
+            x: values.mode === 'absolute' ? values.x - selected.center.x : values.x,
+            y: values.mode === 'absolute' ? values.y - selected.center.y : values.y
+        };
+    }
+    const matrix = selected.pageToModelTransform;
+    if (values.mode === 'absolute') {
+        const target = new THREE.Vector3(values.x, values.y, 0).applyMatrix4(matrix);
+        return {
+            x: target.x - selected.modelCenter.x,
+            y: target.y - selected.modelCenter.y
+        };
+    }
+    const origin = new THREE.Vector3(0, 0, 0).applyMatrix4(matrix);
+    const target = new THREE.Vector3(values.x, values.y, 0).applyMatrix4(matrix);
+    return {
+        x: target.x - origin.x,
+        y: target.y - origin.y
+    };
+}
+
+function CadBoundsCallback(viewer) {
+    this.viewer = viewer;
+    this.modelBounds = new THREE.Box3();
+    this.pageToModelTransform = null;
+}
+
+CadBoundsCallback.prototype.addPoint = function (x, y, vpId) {
+    const matrix = this.viewer.model.getPageToModelTransform(vpId);
+    if (!matrix) {
+        return;
+    }
+    this.pageToModelTransform = this.pageToModelTransform || matrix.clone();
+    this.modelBounds.expandByPoint(new THREE.Vector3(x, y, 0).applyMatrix4(matrix));
+};
+
+CadBoundsCallback.prototype.onLineSegment = function (x1, y1, x2, y2, vpId) {
+    this.addPoint(x1, y1, vpId);
+    this.addPoint(x2, y2, vpId);
+};
+
+CadBoundsCallback.prototype.onCircularArc = function (cx, cy, start, end, radius, vpId) {
+    this.addPoint(cx - radius, cy - radius, vpId);
+    this.addPoint(cx + radius, cy + radius, vpId);
+    this.addPoint(cx + radius * Math.cos(start), cy + radius * Math.sin(start), vpId);
+    this.addPoint(cx + radius * Math.cos(end), cy + radius * Math.sin(end), vpId);
+};
+
+CadBoundsCallback.prototype.onEllipticalArc = function (cx, cy, start, end, major, minor, tilt, vpId) {
+    this.addPoint(cx - major, cy - minor, vpId);
+    this.addPoint(cx + major, cy + minor, vpId);
+    this.addPoint(cx + major * Math.cos(start + tilt), cy + minor * Math.sin(start + tilt), vpId);
+    this.addPoint(cx + major * Math.cos(end + tilt), cy + minor * Math.sin(end + tilt), vpId);
+};
 
 function getBounds3D(viewer, dbId) {
     const model = viewer.model;
