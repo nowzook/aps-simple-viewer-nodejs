@@ -1,5 +1,5 @@
 const { AuthenticationClient, Scopes } = require('@aps_sdk/authentication');
-const { OssClient, Region, PolicyKey } = require('@aps_sdk/oss');
+const { OssClient, Region, PolicyKey, Access } = require('@aps_sdk/oss');
 const { ModelDerivativeClient, View, OutputType } = require('@aps_sdk/model-derivative');
 const { APS_CLIENT_ID, APS_CLIENT_SECRET, APS_BUCKET } = require('../config.js');
 
@@ -15,7 +15,8 @@ async function getInternalToken() {
         Scopes.DataCreate,
         Scopes.DataWrite,
         Scopes.BucketCreate,
-        Scopes.BucketRead
+        Scopes.BucketRead,
+        Scopes.CodeAll
     ]);
     return credentials.access_token;
 }
@@ -56,6 +57,28 @@ service.uploadObject = async (objectName, filePath) => {
     const obj = await ossClient.uploadObject(APS_BUCKET, objectName, filePath, { accessToken });
     return obj;
 };
+
+service.downloadObject = async (objectName, filePath) => {
+    await service.ensureBucketExists(APS_BUCKET);
+    const accessToken = await getInternalToken();
+    await ossClient.downloadObject(APS_BUCKET, objectName, filePath, { accessToken });
+};
+
+service.createSignedResource = async (objectName, access = Access.ReadWrite) => {
+    await service.ensureBucketExists(APS_BUCKET);
+    const accessToken = await getInternalToken();
+    const signed = await ossClient.createSignedResource(APS_BUCKET, objectName, {
+        accessToken,
+        access,
+        createSignedResource: {
+            minutesExpiration: 60,
+            singleUse: false
+        }
+    });
+    return signed.signedUrl;
+};
+
+service.getInternalToken = getInternalToken;
 
 service.translateObject = async (urn, rootFilename) => {
     const accessToken = await getInternalToken();
