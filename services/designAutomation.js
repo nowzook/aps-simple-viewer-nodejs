@@ -48,7 +48,8 @@ function createScript({ handle, mode, x, y, angle, rotationBaseX, rotationBaseY 
 
     return [
         '(vl-load-com)',
-        '(setq ent (handent "' + safeHandle + '"))',
+        '(setq doc (vla-get-activedocument (vlax-get-acad-object)))',
+        '(setq ent (handent "' + safeHandle.toUpperCase() + '"))',
         '(if ent',
         '  (progn',
         '    (setq obj (vlax-ename->vla-object ent))',
@@ -85,12 +86,12 @@ function createScript({ handle, mode, x, y, angle, rotationBaseX, rotationBaseY 
         rotateAngle
             ? `    (vla-rotate obj (vlax-3d-point ${baseX} ${baseY} 0) (* pi (/ ${rotateAngle} 180.0)))`
             : '',
-        '    (vla-save (vla-get-activedocument (vlax-get-acad-object)))',
+        '    (vla-update obj)',
+        '    (entupd ent)',
+        '    (vla-regen doc 1)',
+        '    (vla-saveas doc (strcat (getvar "DWGPREFIX") "output.dwg"))',
         '  )',
         ')',
-        '_SAVEAS',
-        '2018',
-        'output.dwg',
         '_QUIT'
     ].filter(Boolean).join('\n') + '\n';
 }
