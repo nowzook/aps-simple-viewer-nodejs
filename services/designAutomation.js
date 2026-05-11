@@ -45,51 +45,25 @@ function createScript({ handle, mode, x, y, angle, rotationBaseX, rotationBaseY 
     const rotateAngle = Number.isFinite(Number(angle)) ? Number(angle) : 0;
     const baseX = Number.isFinite(Number(rotationBaseX)) ? Number(rotationBaseX) : 0;
     const baseY = Number.isFinite(Number(rotationBaseY)) ? Number(rotationBaseY) : 0;
+    const moveDeltaX = moveMode === 'absolute' ? moveX - baseX : moveX;
+    const moveDeltaY = moveMode === 'absolute' ? moveY - baseY : moveY;
+    const shouldMove = moveDeltaX !== 0 || moveDeltaY !== 0;
+    const shouldRotate = rotateAngle !== 0;
+    const shouldChange = shouldMove || shouldRotate;
 
     return [
-        '(vl-load-com)',
         '(setq ent (handent "' + safeHandle.toUpperCase() + '"))',
-        '(if ent',
-        '  (progn',
-        '    (setq obj (vlax-ename->vla-object ent))',
-        moveMode === 'absolute'
-            ? `    (setq bboxMin (vlax-make-safearray vlax-vbDouble '(0 . 2)))`
-            : '    (setq moveFrom (vlax-3d-point 0 0 0))',
-        moveMode === 'absolute'
-            ? `    (setq bboxMax (vlax-make-safearray vlax-vbDouble '(0 . 2)))`
-            : `    (setq moveTo (vlax-3d-point ${moveX} ${moveY} 0))`,
-        moveMode === 'absolute'
-            ? '    (vla-getboundingbox obj \'bboxMin \'bboxMax)'
-            : '    (vla-move obj moveFrom moveTo)',
-        moveMode === 'absolute'
-            ? '    (setq minPt (vlax-safearray->list bboxMin))'
+        '(if (not ent) (vl-exit-with-error "DWG_EDIT_ENTITY_NOT_FOUND"))',
+        shouldChange ? '(setq before (entget ent))' : '',
+        '(setq ss (ssadd ent))',
+        shouldMove
+            ? `(command "_.MOVE" ss "" (list 0 0 0) (list ${moveDeltaX} ${moveDeltaY} 0))`
             : '',
-        moveMode === 'absolute'
-            ? '    (setq maxPt (vlax-safearray->list bboxMax))'
+        shouldRotate
+            ? `(command "_.ROTATE" ss "" (list ${baseX} ${baseY} 0) ${rotateAngle})`
             : '',
-        moveMode === 'absolute'
-            ? '    (setq currentX (/ (+ (car minPt) (car maxPt)) 2.0))'
-            : '',
-        moveMode === 'absolute'
-            ? '    (setq currentY (/ (+ (cadr minPt) (cadr maxPt)) 2.0))'
-            : '',
-        moveMode === 'absolute'
-            ? `    (setq moveFrom (vlax-3d-point currentX currentY 0))`
-            : '',
-        moveMode === 'absolute'
-            ? `    (setq moveTo (vlax-3d-point ${moveX} ${moveY} 0))`
-            : '',
-        moveMode === 'absolute'
-            ? '    (vla-move obj moveFrom moveTo)'
-            : '',
-        rotateAngle
-            ? `    (vla-rotate obj (vlax-3d-point ${baseX} ${baseY} 0) (* pi (/ ${rotateAngle} 180.0)))`
-            : '',
-        '    (vla-update obj)',
-        '    (entupd ent)',
-        '  )',
-        '  (vl-exit-with-error "DWG_EDIT_ENTITY_NOT_FOUND")',
-        ')',
+        shouldChange ? '(setq after (entget ent))' : '',
+        shouldChange ? '(if (equal before after) (vl-exit-with-error "DWG_EDIT_ENTITY_UNCHANGED"))' : '',
         '_.REGEN',
         '_.SAVEAS',
         '2018',
