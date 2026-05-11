@@ -52,7 +52,6 @@ function createScript({ handle, mode, x, y, angle, rotationBaseX, rotationBaseY 
         '(if ent',
         '  (progn',
         '    (setq obj (vlax-ename->vla-object ent))',
-        '    (setq doc (vla-get-document obj))',
         moveMode === 'absolute'
             ? `    (setq bboxMin (vlax-make-safearray vlax-vbDouble '(0 . 2)))`
             : '    (setq moveFrom (vlax-3d-point 0 0 0))',
@@ -88,10 +87,13 @@ function createScript({ handle, mode, x, y, angle, rotationBaseX, rotationBaseY 
             : '',
         '    (vla-update obj)',
         '    (entupd ent)',
-        '    (vla-regen doc 1)',
-        '    (vla-saveas doc (strcat (getvar "DWGPREFIX") "output.dwg"))',
         '  )',
+        '  (vl-exit-with-error "DWG_EDIT_ENTITY_NOT_FOUND")',
         ')',
+        '_.REGEN',
+        '_.SAVEAS',
+        '2018',
+        'output.dwg',
         '_QUIT'
     ].filter(Boolean).join('\n') + '\n';
 }
