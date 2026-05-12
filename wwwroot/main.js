@@ -144,6 +144,7 @@ async function onModelSelected(viewer, urn) {
             case 'n/a':
                 showNotification(`Model has not been translated.`);
                 break;
+            case 'pending':
             case 'inprogress':
                 showNotification(`Model is being translated (${status.progress})...`);
                 window.onModelSelectedTimeout = setTimeout(onModelSelected, 5000, viewer, urn);

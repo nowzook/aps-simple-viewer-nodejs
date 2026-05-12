@@ -3,6 +3,7 @@ const { APS_BUCKET } = require('../config.js');
 const { runDwgTransform, getWorkItemStatus } = require('../services/designAutomation.js');
 const { translateObject, urnify } = require('../services/aps.js');
 const { createEditedObjectName, decodeObjectName } = require('../services/modelNames.js');
+const logger = require('../services/logger.js');
 
 function parseObjectId(urn) {
     const padded = urn + '='.repeat((4 - urn.length % 4) % 4);
@@ -63,14 +64,19 @@ router.use(express.json());
 
 router.post('/api/models/:urn/edits', async function (req, res, next) {
     try {
+        logger.info('DRAWING_EDIT', '편집 요청 수신', { urn: req.params.urn });
         const transform = validateTransform(req.body);
+        logger.info('DRAWING_EDIT', '편집 입력값 검증 완료', transform);
         const { objectName } = parseObjectId(req.params.urn);
+        logger.info('DRAWING_EDIT', '편집 대상 도면 파싱 완료', { objectName });
         const outputObjectName = createEditedObjectName(objectName);
+        logger.info('DRAWING_EDIT', '편집 결과 도면 이름 생성 완료', { outputObjectName });
         const status = await runDwgTransform({
             inputObjectName: objectName,
             outputObjectName,
             transform
         });
+        logger.info('DRAWING_EDIT', '편집 WorkItem 생성 완료', { workItemId: status.id, status: status.status });
         edits.set(status.id, {
             outputObjectName,
             translated: false
@@ -80,18 +86,22 @@ router.post('/api/models/:urn/edits', async function (req, res, next) {
             status: status.status
         });
     } catch (err) {
+        logger.error('DRAWING_EDIT', '편집 요청 처리 실패', { urn: req.params.urn, message: err.message });
         next(err);
     }
 });
 
 router.get('/api/edits/:workItemId', async function (req, res, next) {
     try {
+        logger.info('DRAWING_EDIT', '편집 상태 조회 시작', { workItemId: req.params.workItemId });
         const edit = edits.get(req.params.workItemId);
         if (!edit) {
+            logger.error('DRAWING_EDIT', '알 수 없는 편집 WorkItem', { workItemId: req.params.workItemId });
             res.status(404).send('Unknown edit work item.');
             return;
         }
         const status = await getWorkItemStatus(req.params.workItemId);
+        logger.info('DRAWING_EDIT', '편집 상태 조회 완료', { workItemId: req.params.workItemId, status: status.status, progress: status.progress });
         const response = {
             workItemId: req.params.workItemId,
             status: status.status,
@@ -102,8 +112,10 @@ router.get('/api/edits/:workItemId', async function (req, res, next) {
             const outputObjectId = `urn:adsk.objects:os.object:${APS_BUCKET}/${encodeURIComponent(edit.outputObjectName)}`;
             const urn = urnify(outputObjectId);
             if (!edit.translated) {
+                logger.info('DRAWING_EDIT', '편집 결과 도면 변환 요청 시작', { workItemId: req.params.workItemId, urn });
                 await translateObject(urn);
                 edit.translated = true;
+                logger.info('DRAWING_EDIT', '편집 결과 도면 변환 요청 완료', { workItemId: req.params.workItemId, urn });
             }
             response.model = {
                 name: decodeObjectName(edit.outputObjectName),
@@ -112,6 +124,7 @@ router.get('/api/edits/:workItemId', async function (req, res, next) {
         }
         res.json(response);
     } catch (err) {
+        logger.error('DRAWING_EDIT', '편집 상태 조회 실패', { workItemId: req.params.workItemId, message: err.message });
         next(err);
     }
 });

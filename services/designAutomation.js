@@ -6,6 +6,7 @@ const {
 const { Access } = require('@aps_sdk/oss');
 const { APS_CLIENT_ID, APS_DESIGN_AUTOMATION_NICKNAME } = require('../config.js');
 const { createSignedResource, getInternalToken } = require('./aps.js');
+const logger = require('./logger.js');
 
 const ACTIVITY_ID = 'DwgObjectTransform';
 const ACTIVITY_ALIAS = 'dev';
@@ -111,12 +112,16 @@ function createScript({ handle, mode, x, y, angle, rotationBaseX, rotationBaseY,
 async function ensureActivity() {
     const api = await getDesignAutomationApi();
     try {
+        logger.info('DRAWING_EDIT', 'Design Automation Activity alias 확인 시작', { activityId: ACTIVITY_ID, alias: ACTIVITY_ALIAS });
         await api.getActivityAlias(ACTIVITY_ID, ACTIVITY_ALIAS);
+        logger.info('DRAWING_EDIT', 'Design Automation Activity alias 확인 완료', { qualifiedActivityId: getQualifiedActivityId() });
         return getQualifiedActivityId();
     } catch (err) {
         if (!String(err?.status || err?.response?.status || err?.message).includes('404')) {
+            logger.error('DRAWING_EDIT', 'Design Automation Activity alias 확인 실패', { message: err.message });
             throw err;
         }
+        logger.info('DRAWING_EDIT', 'Design Automation Activity alias 없음, 새로 생성 진행', { activityId: ACTIVITY_ID, alias: ACTIVITY_ALIAS });
     }
 
     const activity = {
@@ -149,29 +154,43 @@ async function ensureActivity() {
 
     let version = 1;
     try {
+        logger.info('DRAWING_EDIT', 'Design Automation Activity 생성 시작', { activityId: ACTIVITY_ID });
         const created = await api.createActivity(activity);
         version = created.version || 1;
+        logger.info('DRAWING_EDIT', 'Design Automation Activity 생성 완료', { activityId: ACTIVITY_ID, version });
     } catch (err) {
         if (!String(err?.status || err?.response?.status || err?.message).includes('409')) {
+            logger.error('DRAWING_EDIT', 'Design Automation Activity 생성 실패', { activityId: ACTIVITY_ID, message: err.message });
             throw err;
         }
+        logger.info('DRAWING_EDIT', 'Design Automation Activity 기존 항목 감지, 새 버전 생성 시작', { activityId: ACTIVITY_ID });
         const created = await api.createActivityVersion(ACTIVITY_ID, activity);
         version = created.version || 1;
+        logger.info('DRAWING_EDIT', 'Design Automation Activity 새 버전 생성 완료', { activityId: ACTIVITY_ID, version });
     }
+    logger.info('DRAWING_EDIT', 'Design Automation Activity alias 생성 시작', { activityId: ACTIVITY_ID, alias: ACTIVITY_ALIAS, version });
     await api.createActivityAlias(ACTIVITY_ID, {
         id: ACTIVITY_ALIAS,
         version
     });
+    logger.info('DRAWING_EDIT', 'Design Automation Activity alias 생성 완료', { qualifiedActivityId: getQualifiedActivityId(), version });
     return getQualifiedActivityId();
 }
 
 async function runDwgTransform({ inputObjectName, outputObjectName, transform }) {
+    logger.info('DRAWING_EDIT', '편집 실행 준비 시작', { inputObjectName, outputObjectName });
     const api = await getDesignAutomationApi();
+    logger.info('DRAWING_EDIT', 'Design Automation API 준비 완료');
     const activityId = await ensureActivity();
+    logger.info('DRAWING_EDIT', '편집 Activity 준비 완료', { activityId });
     const accessToken = await getInternalToken();
+    logger.info('DRAWING_EDIT', '편집용 내부 토큰 발급 완료');
     const inputUrl = await createSignedResource(inputObjectName, Access.Read);
+    logger.info('DRAWING_EDIT', '편집 입력 도면 signed URL 생성 완료', { inputObjectName });
     const outputUrl = await createSignedResource(outputObjectName, Access.ReadWrite);
+    logger.info('DRAWING_EDIT', '편집 결과 도면 signed URL 생성 완료', { outputObjectName });
     const script = createScript(transform);
+    logger.info('DRAWING_EDIT', '편집 AutoLISP 스크립트 생성 완료', { handle: transform.handle, mode: transform.mode });
     const workItem = {
         activityId,
         arguments: {
@@ -216,17 +235,26 @@ async function runDwgTransform({ inputObjectName, outputObjectName, transform })
             }
         }
     };
+    logger.info('DRAWING_EDIT', '편집 Activity 새 버전 생성 시작', { activityId: ACTIVITY_ID });
     const updatedActivity = await api.createActivityVersion(ACTIVITY_ID, activity);
+    logger.info('DRAWING_EDIT', '편집 Activity 새 버전 생성 완료', { activityId: ACTIVITY_ID, version: updatedActivity.version });
+    logger.info('DRAWING_EDIT', '편집 Activity alias 갱신 시작', { activityId: ACTIVITY_ID, alias: ACTIVITY_ALIAS, version: updatedActivity.version });
     await api.modifyActivityAlias(ACTIVITY_ID, ACTIVITY_ALIAS, {
         version: updatedActivity.version
     });
+    logger.info('DRAWING_EDIT', '편집 Activity alias 갱신 완료', { qualifiedActivityId: activityId, version: updatedActivity.version });
+    logger.info('DRAWING_EDIT', '편집 WorkItem 제출 시작', { inputObjectName, outputObjectName });
     const status = await api.createWorkItem(workItem);
+    logger.info('DRAWING_EDIT', '편집 WorkItem 제출 완료', { workItemId: status.id, status: status.status });
     return status;
 }
 
 async function getWorkItemStatus(workItemId) {
     const api = await getDesignAutomationApi();
-    return await api.getWorkitemStatus(workItemId);
+    logger.info('DRAWING_EDIT', 'Design Automation WorkItem 상태 API 호출 시작', { workItemId });
+    const status = await api.getWorkitemStatus(workItemId);
+    logger.info('DRAWING_EDIT', 'Design Automation WorkItem 상태 API 호출 완료', { workItemId, status: status.status, progress: status.progress });
+    return status;
 }
 
 module.exports = {
