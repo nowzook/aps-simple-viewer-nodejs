@@ -25,19 +25,28 @@ export function setupObjectEditor(viewer, getCurrentUrn, onModelReady) {
         if (!status.hasSelected || status.numSelected !== 1) {
             return;
         }
+        if (!isDwgUrn(getCurrentUrn())) {
+            return;
+        }
         menu.push({
             title: '객체편집',
             target: [
                 {
-                    title: '위치이동',
+                    title: '객체이동/회전',
                     target: async () => {
-                        await openEditor(viewer, panel, 'move', selectedObject => selected = selectedObject);
+                        await openEditor(viewer, panel, 'transform', selectedObject => selected = selectedObject);
                     }
                 },
                 {
-                    title: '회전',
+                    title: '객체삭제',
                     target: async () => {
-                        await openEditor(viewer, panel, 'rotate', selectedObject => selected = selectedObject);
+                        await deleteSelectedObject(viewer, panel, selectedObject => selected = selectedObject);
+                    }
+                },
+                {
+                    title: '객체복사',
+                    target: async () => {
+                        await copySelectedObject(viewer, panel, selectedObject => selected = selectedObject);
                     }
                 }
             ]
@@ -52,6 +61,9 @@ export function setupObjectEditor(viewer, getCurrentUrn, onModelReady) {
         if (!urn) {
             throw new Error('로드된 모델 URN을 확인할 수 없습니다.');
         }
+        if (!isDwgUrn(urn)) {
+            throw new Error('객체편집은 DWG 도면에서만 사용할 수 있습니다.');
+        }
         panel.setBusy('DWG 편집 작업을 시작하는 중...');
         const moveDelta = getModelMoveDelta(selected, values);
         const angleDelta = getRotationDelta(selected, values);
@@ -59,6 +71,7 @@ export function setupObjectEditor(viewer, getCurrentUrn, onModelReady) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+                operation: values.operation || 'transform',
                 handle: selected.handle,
                 mode: values.mode,
                 x: values.x,
@@ -76,6 +89,47 @@ export function setupObjectEditor(viewer, getCurrentUrn, onModelReady) {
         const { workItemId } = await resp.json();
         pollWorkItem(workItemId, panel, onModelReady);
     };
+
+    panel.onDelete = async () => {
+        if (!selected) {
+            throw new Error('객체가 선택되지 않았습니다.');
+        }
+        const urn = getCurrentUrn();
+        if (!urn) {
+            throw new Error('로드된 모델 URN을 확인할 수 없습니다.');
+        }
+        if (!isDwgUrn(urn)) {
+            throw new Error('객체편집은 DWG 도면에서만 사용할 수 있습니다.');
+        }
+        panel.setBusy('DWG 객체 삭제 작업을 시작하는 중...');
+        const resp = await fetch(`/api/models/${encodeURIComponent(urn)}/edits`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                operation: 'delete',
+                handle: selected.handle
+            })
+        });
+        if (!resp.ok) {
+            throw new Error(await resp.text());
+        }
+        const { workItemId } = await resp.json();
+        pollWorkItem(workItemId, panel, onModelReady);
+    };
+}
+
+function isDwgUrn(urn) {
+    if (!urn) {
+        return false;
+    }
+    try {
+        const padded = urn + '='.repeat((4 - urn.length % 4) % 4);
+        const objectId = atob(padded);
+        const objectName = objectId.substring(objectId.lastIndexOf('/') + 1);
+        return decodeURIComponent(objectName).toLowerCase().endsWith('.dwg');
+    } catch (_err) {
+        return false;
+    }
 }
 
 async function openEditor(viewer, panel, mode, setSelected) {
@@ -83,6 +137,32 @@ async function openEditor(viewer, panel, mode, setSelected) {
         const selected = await getSelectedObject(viewer, viewer.getSelection()[0]);
         setSelected(selected);
         panel.open(mode, selected);
+    } catch (err) {
+        panel.setBusy(err.message);
+        console.error(err);
+    }
+}
+
+async function deleteSelectedObject(viewer, panel, setSelected) {
+    try {
+        const selected = await getSelectedObject(viewer, viewer.getSelection()[0]);
+        if (!confirm(`선택한 객체를 삭제하시겠습니까?\n${selected.name} (${selected.type}, ${selected.handle})`)) {
+            return;
+        }
+        setSelected(selected);
+        panel.open('delete', selected);
+        await panel.onDelete();
+    } catch (err) {
+        panel.setBusy(err.message);
+        console.error(err);
+    }
+}
+
+async function copySelectedObject(viewer, panel, setSelected) {
+    try {
+        const selected = await getSelectedObject(viewer, viewer.getSelection()[0]);
+        setSelected(selected);
+        panel.open('copy', selected);
     } catch (err) {
         panel.setBusy(err.message);
         console.error(err);
@@ -297,7 +377,7 @@ function createPanel() {
     element.id = 'object-editor';
     element.innerHTML = `
         <div class="object-editor-header">
-            <strong>객체편집</strong>
+            <strong data-field="title">객체편집</strong>
             <button type="button" data-action="close">×</button>
         </div>
         <div class="object-editor-body">
@@ -335,18 +415,23 @@ function createPanel() {
     const panel = {
         onApply: null,
         open(mode, selected) {
+            this.currentMode = mode;
             this.setSelectedObject(selected);
+            this.setTitle(mode);
             element.style.display = 'block';
-            if (mode === 'move') {
-                element.querySelector('[data-field="x"]').focus();
-            } else {
-                element.querySelector('[data-field="angle"]').focus();
+            if (mode === 'copy') {
+                element.querySelector('input[name="move-mode"][value="relative"]').checked = true;
+                element.querySelector('[data-field="x"]').value = 100;
+                element.querySelector('[data-field="y"]').value = 100;
+                element.querySelector('[data-field="angle"]').value = 0;
             }
+            element.querySelector('[data-field="x"]').focus();
         },
         hide() {
             element.style.display = 'none';
         },
         currentSelected: null,
+        currentMode: 'transform',
         setSelectedObject(selected) {
             if (!selected) {
                 return;
@@ -357,7 +442,7 @@ function createPanel() {
             const refY = selected.modelCenter?.y ?? selected.center.y;
             element.querySelector('[data-field="current"]').textContent = `X ${formatNumber(refX)}, Y ${formatNumber(refY)}`;
             element.querySelector('[data-field="current-angle"]').textContent = `${formatNumber(selected.angle)}°`;
-            const absoluteMode = (element.querySelector('input[name="move-mode"]:checked') || {}).value !== 'relative';
+            const absoluteMode = this.currentMode !== 'copy' && (element.querySelector('input[name="move-mode"]:checked') || {}).value !== 'relative';
             element.querySelector('[data-field="x"]').value = absoluteMode ? formatNumber(refX) : 0;
             element.querySelector('[data-field="y"]').value = absoluteMode ? formatNumber(refY) : 0;
             element.querySelector('[data-field="angle"]').value = absoluteMode ? formatNumber(selected.angle) : 0;
@@ -365,6 +450,9 @@ function createPanel() {
         },
         setBusy(message) {
             element.querySelector('[data-field="status"]').textContent = message;
+        },
+        setTitle(mode) {
+            element.querySelector('[data-field="title"]').textContent = mode === 'copy' ? '객체편집 (복사)' : '객체편집 (이동/회전)';
         }
     };
 
@@ -380,6 +468,7 @@ function createPanel() {
         if (action === 'apply') {
             try {
                 await panel.onApply({
+                    operation: panel.currentMode === 'copy' ? 'copy' : 'transform',
                     mode: element.querySelector('input[name="move-mode"]:checked').value,
                     x: parseFloat(element.querySelector('[data-field="x"]').value),
                     y: parseFloat(element.querySelector('[data-field="y"]').value),

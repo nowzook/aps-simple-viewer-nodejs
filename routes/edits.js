@@ -26,12 +26,14 @@ function parseObjectId(urn) {
 
 function validateTransform(body) {
     const handle = String(body?.handle || '').replace(/[^0-9A-Z]/gi, '');
+    const operation = ['copy', 'delete'].includes(body?.operation) ? body.operation : 'transform';
     if (!handle) {
         const err = new Error('DWG entity handle is required.');
         err.status = 400;
         throw err;
     }
     return {
+        operation,
         handle,
         mode: body.mode === 'absolute' ? 'absolute' : 'relative',
         x: normalizeNumber(body.x),
