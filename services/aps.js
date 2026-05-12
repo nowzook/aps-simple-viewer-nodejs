@@ -61,7 +61,11 @@ service.uploadObject = async (objectName, filePath) => {
 service.downloadObject = async (objectName, filePath) => {
     await service.ensureBucketExists(APS_BUCKET);
     const accessToken = await getInternalToken();
-    await ossClient.downloadObject(APS_BUCKET, objectName, filePath, { accessToken });
+    if (filePath) {
+        await ossClient.downloadObject(APS_BUCKET, objectName, filePath, { accessToken });
+        return;
+    }
+    return await ossClient.downloadObject(APS_BUCKET, objectName, { accessToken });
 };
 
 service.deleteObject = async (objectName) => {

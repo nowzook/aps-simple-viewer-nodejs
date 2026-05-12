@@ -5,6 +5,7 @@ initViewer(document.getElementById('preview')).then(viewer => {
     const urn = window.location.hash?.substring(1);
     setupModelSelection(viewer, urn);
     setupModelUpload(viewer);
+    setupModelDownload();
     setupModelDelete(viewer);
     setupObjectEditor(viewer, () => window.location.hash?.substring(1), model => {
         setupModelSelection(viewer, model.urn);
@@ -13,6 +14,7 @@ initViewer(document.getElementById('preview')).then(viewer => {
 
 async function setupModelSelection(viewer, selectedUrn) {
     const dropdown = document.getElementById('models');
+    const downloadButton = document.getElementById('download');
     const deleteButton = document.getElementById('delete');
     dropdown.innerHTML = '';
     try {
@@ -25,12 +27,18 @@ async function setupModelSelection(viewer, selectedUrn) {
         dropdown.onchange = () => onModelSelected(viewer, dropdown.value);
         if (dropdown.value) {
             onModelSelected(viewer, dropdown.value);
+            if (downloadButton) {
+                downloadButton.removeAttribute('disabled');
+            }
             if (deleteButton) {
                 deleteButton.removeAttribute('disabled');
             }
         } else {
             unloadCurrentModel(viewer);
             window.location.hash = '';
+            if (downloadButton) {
+                downloadButton.setAttribute('disabled', 'true');
+            }
             if (deleteButton) {
                 deleteButton.setAttribute('disabled', 'true');
             }
@@ -39,6 +47,21 @@ async function setupModelSelection(viewer, selectedUrn) {
         alert('Could not list models. See the console for more details.');
         console.error(err);
     }
+}
+
+function setupModelDownload() {
+    const button = document.getElementById('download');
+    if (!button) {
+        return;
+    }
+    button.onclick = () => {
+        const dropdown = document.getElementById('models');
+        const urn = dropdown.value;
+        if (!urn) {
+            return;
+        }
+        window.location.href = `/api/models/${encodeURIComponent(urn)}/download`;
+    };
 }
 
 function unloadCurrentModel(viewer) {

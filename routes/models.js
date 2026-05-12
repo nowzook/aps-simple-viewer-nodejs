@@ -1,7 +1,7 @@
 const express = require('express');
 const formidable = require('express-formidable');
 const { APS_BUCKET } = require('../config.js');
-const { listObjects, uploadObject, deleteObject, translateObject, getManifest, urnify } = require('../services/aps.js');
+const { listObjects, uploadObject, createSignedResource, deleteObject, translateObject, getManifest, urnify } = require('../services/aps.js');
 const { decodeObjectName, encodeObjectName } = require('../services/modelNames.js');
 const logger = require('../services/logger.js');
 
@@ -87,6 +87,24 @@ router.post('/api/models', formidable({ maxFileSize: Infinity }), async function
         });
     } catch (err) {
         logger.error('DRAWING_LOAD', '도면 업로드 또는 변환 요청 실패', { fileName: file.name, message: err.message });
+        next(err);
+    }
+});
+
+router.get('/api/models/:urn/download', async function (req, res, next) {
+    try {
+        logger.info('DRAWING_LOAD', '도면 다운로드 요청 시작', { urn: req.params.urn });
+        const objectName = parseObjectName(req.params.urn);
+        const fileName = decodeObjectName(objectName);
+        const signedUrl = await createSignedResource(objectName);
+        logger.info('DRAWING_LOAD', '도면 다운로드 signed URL 생성 완료', { objectName, fileName });
+        res.redirect(signedUrl);
+    } catch (err) {
+        logger.error('DRAWING_LOAD', '도면 다운로드 실패', { urn: req.params.urn, message: err.message });
+        if (err.status === 400) {
+            res.status(400).send(err.message);
+            return;
+        }
         next(err);
     }
 });
