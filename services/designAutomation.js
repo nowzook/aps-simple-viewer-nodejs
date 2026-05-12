@@ -37,6 +37,12 @@ function getQualifiedActivityId() {
     return `${getNickname()}.${ACTIVITY_ID}+${ACTIVITY_ALIAS}`;
 }
 
+function formatLispNumber(n) {
+    if (!Number.isFinite(n)) return '0.0';
+    const s = String(n);
+    return s.indexOf('.') === -1 && s.indexOf('e') === -1 ? `${s}.0` : s;
+}
+
 function createScript({ handle, mode, x, y, angle, rotationBaseX, rotationBaseY, moveDeltaX, moveDeltaY }) {
     const safeHandle = String(handle || '').replace(/[^0-9A-Z]/gi, '');
     const moveMode = mode === 'absolute' ? 'absolute' : 'relative';
@@ -51,25 +57,55 @@ function createScript({ handle, mode, x, y, angle, rotationBaseX, rotationBaseY,
     const shouldRotate = rotateAngle !== 0;
     const shouldChange = shouldMove || shouldRotate;
 
-    return [
-        '(setq ent (handent "' + safeHandle.toUpperCase() + '"))',
+    const handleUpper = safeHandle.toUpperCase();
+    const dxFmt = formatLispNumber(deltaX);
+    const dyFmt = formatLispNumber(deltaY);
+    const cxFmt = formatLispNumber(baseX);
+    const cyFmt = formatLispNumber(baseY);
+    const aFmt = formatLispNumber(rotateAngle);
+    const lispLines = [
+        `(setq ent (handent "${handleUpper}"))`,
         '(if (not ent) (vl-exit-with-error "DWG_EDIT_ENTITY_NOT_FOUND"))',
-        shouldChange ? '(setq before (entget ent))' : '',
-        '(setq ss (ssadd ent))',
-        shouldMove
-            ? `(command "_.MOVE" ss "" (list 0 0 0) (list ${deltaX} ${deltaY} 0))`
-            : '',
-        shouldRotate
-            ? `(command "_.ROTATE" ss "" (list ${baseX} ${baseY} 0) ${rotateAngle})`
-            : '',
-        shouldChange ? '(setq after (entget ent))' : '',
-        shouldChange ? '(if (equal before after) (vl-exit-with-error "DWG_EDIT_ENTITY_UNCHANGED"))' : '',
-        '_.REGEN',
-        '_.SAVEAS',
-        '2018',
-        'output.dwg',
-        '_QUIT'
-    ].filter(Boolean).join('\n') + '\n';
+        '(setq data (entget ent))',
+        `(setq dx ${dxFmt})`,
+        `(setq dy ${dyFmt})`,
+        `(setq cx ${cxFmt})`,
+        `(setq cy ${cyFmt})`,
+        `(setq rad (* ${aFmt} (/ pi 180.0)))`
+    ];
+
+    lispLines.push('(defun transform-point (pt / px py pz rpx rpy)');
+    lispLines.push('  (setq px (car pt)) (setq py (cadr pt))');
+    lispLines.push('  (setq pz (if (caddr pt) (caddr pt) 0.0))');
+    if (shouldRotate) {
+        lispLines.push('  (setq rpx (+ cx (- (* (- px cx) (cos rad)) (* (- py cy) (sin rad)))))');
+        lispLines.push('  (setq rpy (+ cy (+ (* (- px cx) (sin rad)) (* (- py cy) (cos rad)))))');
+        lispLines.push('  (setq px rpx) (setq py rpy)');
+    }
+    if (shouldMove) {
+        lispLines.push('  (setq px (+ px dx)) (setq py (+ py dy))');
+    }
+    lispLines.push('  (list px py pz))');
+
+    lispLines.push('(setq newdata (mapcar');
+    lispLines.push('  (function (lambda (e)');
+    lispLines.push('    (cond');
+    lispLines.push('      ((or (= (car e) 10) (= (car e) 11)) (cons (car e) (transform-point (cdr e))))');
+    if (shouldRotate) {
+        lispLines.push('      ((= (car e) 50) (cons 50 (+ (cdr e) rad)))');
+    }
+    lispLines.push('      (t e))))');
+    lispLines.push('  data))');
+
+    lispLines.push('(if (equal data newdata) (vl-exit-with-error "DWG_EDIT_ENTITY_UNCHANGED"))');
+    lispLines.push('(if (not (entmod newdata)) (vl-exit-with-error "DWG_EDIT_ENTMOD_FAILED"))');
+    lispLines.push('(entupd ent)');
+    lispLines.push('_.REGEN');
+    lispLines.push('_.SAVEAS');
+    lispLines.push('2018');
+    lispLines.push('output.dwg');
+    lispLines.push('_QUIT');
+    return lispLines.join('\n') + '\n';
 }
 
 async function ensureActivity() {

@@ -13,7 +13,12 @@ function parseObjectName(urn) {
         error.status = 400;
         throw error;
     }
-    return objectId.substring(prefix.length);
+    const raw = objectId.substring(prefix.length);
+    try {
+        return decodeURIComponent(raw);
+    } catch (_err) {
+        return raw;
+    }
 }
 
 let router = express.Router();
