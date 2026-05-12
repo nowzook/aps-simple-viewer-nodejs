@@ -1,7 +1,20 @@
 const express = require('express');
 const formidable = require('express-formidable');
-const { listObjects, uploadObject, translateObject, getManifest, urnify } = require('../services/aps.js');
+const { APS_BUCKET } = require('../config.js');
+const { listObjects, uploadObject, deleteObject, translateObject, getManifest, urnify } = require('../services/aps.js');
 const { decodeObjectName, encodeObjectName } = require('../services/modelNames.js');
+
+function parseObjectName(urn) {
+    const padded = urn + '='.repeat((4 - urn.length % 4) % 4);
+    const objectId = Buffer.from(padded, 'base64').toString('utf8');
+    const prefix = `urn:adsk.objects:os.object:${APS_BUCKET}/`;
+    if (!objectId.startsWith(prefix)) {
+        const error = new Error('URN does not belong to the current bucket.');
+        error.status = 400;
+        throw error;
+    }
+    return objectId.substring(prefix.length);
+}
 
 let router = express.Router();
 
@@ -56,6 +69,23 @@ router.post('/api/models', formidable({ maxFileSize: Infinity }), async function
             urn: urnify(obj.objectId)
         });
     } catch (err) {
+        next(err);
+    }
+});
+
+router.delete('/api/models/:urn', async function (req, res, next) {
+    try {
+        const objectName = parseObjectName(req.params.urn);
+        await deleteObject(objectName);
+        res.json({
+            name: decodeObjectName(objectName),
+            urn: req.params.urn
+        });
+    } catch (err) {
+        if (err.status === 400) {
+            res.status(400).send(err.message);
+            return;
+        }
         next(err);
     }
 });

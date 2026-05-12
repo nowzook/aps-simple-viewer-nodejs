@@ -53,6 +53,8 @@ export function setupObjectEditor(viewer, getCurrentUrn, onModelReady) {
             throw new Error('로드된 모델 URN을 확인할 수 없습니다.');
         }
         panel.setBusy('DWG 편집 작업을 시작하는 중...');
+        const moveDelta = getModelMoveDelta(selected, values);
+        const angleDelta = getRotationDelta(selected, values);
         const resp = await fetch(`/api/models/${encodeURIComponent(urn)}/edits`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -61,11 +63,11 @@ export function setupObjectEditor(viewer, getCurrentUrn, onModelReady) {
                 mode: values.mode,
                 x: values.x,
                 y: values.y,
-                angle: values.angle,
+                angle: angleDelta,
                 rotationBaseX: selected.modelCenter?.x ?? selected.center.x,
                 rotationBaseY: selected.modelCenter?.y ?? selected.center.y,
-                moveDeltaX: getModelMoveDelta(selected, values).x,
-                moveDeltaY: getModelMoveDelta(selected, values).y
+                moveDeltaX: moveDelta.x,
+                moveDeltaY: moveDelta.y
             })
         });
         if (!resp.ok) {
@@ -173,12 +175,20 @@ function validateEditableType(type, name) {
 }
 
 function getObjectAngle(properties) {
-    const angle = Number(getPropertyValue(properties, 'Angle'));
-    if (Number.isFinite(angle)) {
-        return angle;
+    const named = ['Rotation', 'Angle', 'Rotate', '회전', '회전각도', 'Rotation Angle'];
+    for (const name of named) {
+        const value = Number(getPropertyValue(properties, name));
+        if (Number.isFinite(value)) {
+            return value;
+        }
     }
-    const rotation = Number(getPropertyValue(properties, 'Rotation'));
-    return Number.isFinite(rotation) ? rotation : 0;
+    const match = properties.properties?.find(item => {
+        if (!item || !/rot|angle|회전/i.test(item.displayName || '')) {
+            return false;
+        }
+        return Number.isFinite(Number(item.displayValue));
+    });
+    return match ? Number(match.displayValue) : 0;
 }
 
 function getBounds2D(viewer, dbId) {
@@ -212,26 +222,23 @@ function getBounds2D(viewer, dbId) {
 }
 
 function getModelMoveDelta(selected, values) {
-    if (!selected.pageToModelTransform || !selected.modelCenter) {
-        return {
-            x: values.mode === 'absolute' ? values.x - selected.center.x : values.x,
-            y: values.mode === 'absolute' ? values.y - selected.center.y : values.y
-        };
-    }
-    const matrix = selected.pageToModelTransform;
+    const referenceX = selected.modelCenter?.x ?? selected.center.x;
+    const referenceY = selected.modelCenter?.y ?? selected.center.y;
     if (values.mode === 'absolute') {
-        const target = new THREE.Vector3(values.x, values.y, 0).applyMatrix4(matrix);
         return {
-            x: target.x - selected.modelCenter.x,
-            y: target.y - selected.modelCenter.y
+            x: values.x - referenceX,
+            y: values.y - referenceY
         };
     }
-    const origin = new THREE.Vector3(0, 0, 0).applyMatrix4(matrix);
-    const target = new THREE.Vector3(values.x, values.y, 0).applyMatrix4(matrix);
-    return {
-        x: target.x - origin.x,
-        y: target.y - origin.y
-    };
+    return { x: values.x, y: values.y };
+}
+
+function getRotationDelta(selected, values) {
+    const current = Number.isFinite(selected.angle) ? selected.angle : 0;
+    if (values.mode === 'absolute') {
+        return values.angle - current;
+    }
+    return values.angle;
 }
 
 function CadBoundsCallback(viewer) {
@@ -296,10 +303,13 @@ function createPanel() {
         <div class="object-editor-body">
             <div class="object-editor-row"><span>선택 객체</span><output data-field="name">-</output></div>
             <div class="object-editor-row"><span>현재 좌표</span><output data-field="current">-</output></div>
-            <fieldset>
+            <div class="object-editor-row"><span>현재 회전</span><output data-field="current-angle">-</output></div>
+            <fieldset class="object-editor-mode">
                 <legend>이동 방식</legend>
-                <label><input type="radio" name="move-mode" value="absolute" checked> 절대좌표</label>
-                <label><input type="radio" name="move-mode" value="relative"> 상대좌표</label>
+                <div class="object-editor-mode-options">
+                    <label><input type="radio" name="move-mode" value="absolute" checked><span>절대좌표</span></label>
+                    <label><input type="radio" name="move-mode" value="relative"><span>상대좌표</span></label>
+                </div>
             </fieldset>
             <label>X <input type="number" step="1" data-field="x"></label>
             <div class="object-editor-buttons">
@@ -336,15 +346,21 @@ function createPanel() {
         hide() {
             element.style.display = 'none';
         },
+        currentSelected: null,
         setSelectedObject(selected) {
             if (!selected) {
                 return;
             }
+            this.currentSelected = selected;
             element.querySelector('[data-field="name"]').textContent = `${selected.name} (${selected.type}, ${selected.handle})`;
-            element.querySelector('[data-field="current"]').textContent = `X ${formatNumber(selected.center.x)}, Y ${formatNumber(selected.center.y)}`;
-            element.querySelector('[data-field="x"]').value = formatNumber(selected.center.x);
-            element.querySelector('[data-field="y"]').value = formatNumber(selected.center.y);
-            element.querySelector('[data-field="angle"]').value = selected.angle;
+            const refX = selected.modelCenter?.x ?? selected.center.x;
+            const refY = selected.modelCenter?.y ?? selected.center.y;
+            element.querySelector('[data-field="current"]').textContent = `X ${formatNumber(refX)}, Y ${formatNumber(refY)}`;
+            element.querySelector('[data-field="current-angle"]').textContent = `${formatNumber(selected.angle)}°`;
+            const absoluteMode = (element.querySelector('input[name="move-mode"]:checked') || {}).value !== 'relative';
+            element.querySelector('[data-field="x"]').value = absoluteMode ? formatNumber(refX) : 0;
+            element.querySelector('[data-field="y"]').value = absoluteMode ? formatNumber(refY) : 0;
+            element.querySelector('[data-field="angle"]').value = absoluteMode ? formatNumber(selected.angle) : 0;
             element.querySelector('[data-field="status"]').textContent = '';
         },
         setBusy(message) {
@@ -383,9 +399,19 @@ function createPanel() {
     });
 
     element.addEventListener('change', event => {
-        if (event.target.name === 'move-mode' && event.target.value === 'relative') {
+        if (event.target.name !== 'move-mode') {
+            return;
+        }
+        if (event.target.value === 'relative') {
             element.querySelector('[data-field="x"]').value = 0;
             element.querySelector('[data-field="y"]').value = 0;
+            element.querySelector('[data-field="angle"]').value = 0;
+        } else if (panel.currentSelected) {
+            const refX = panel.currentSelected.modelCenter?.x ?? panel.currentSelected.center.x;
+            const refY = panel.currentSelected.modelCenter?.y ?? panel.currentSelected.center.y;
+            element.querySelector('[data-field="x"]').value = formatNumber(refX);
+            element.querySelector('[data-field="y"]').value = formatNumber(refY);
+            element.querySelector('[data-field="angle"]').value = formatNumber(panel.currentSelected.angle);
         }
     });
 

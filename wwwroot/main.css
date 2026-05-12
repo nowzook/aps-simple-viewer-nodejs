@@ -44,6 +44,20 @@ body, html {
     font-family: ArtifaktElement;
 }
 
+#header .danger {
+    background-color: #d33;
+    border: 1px solid #b22;
+    color: white;
+    cursor: pointer;
+    padding: 0 0.75em;
+}
+
+#header .danger:disabled {
+    background-color: #aaa;
+    border-color: #888;
+    cursor: not-allowed;
+}
+
 #header .title {
     flex: 1 0 auto;
     height: auto;
@@ -90,6 +104,35 @@ body, html {
 .object-editor-body label {
     display: grid;
     gap: 0.25em;
+}
+
+.object-editor-mode {
+    border: 1px solid #ddd;
+    padding: 0.5em 0.75em;
+    margin: 0;
+}
+
+.object-editor-mode legend {
+    padding: 0 0.25em;
+    font-size: 0.9em;
+    color: #444;
+}
+
+.object-editor-mode .object-editor-mode-options {
+    display: flex;
+    flex-flow: row wrap;
+    gap: 1em;
+}
+
+.object-editor-mode .object-editor-mode-options label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35em;
+    margin: 0;
+}
+
+.object-editor-mode .object-editor-mode-options input[type="radio"] {
+    margin: 0;
 }
 
 .object-editor-body input[type="number"] {

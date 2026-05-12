@@ -64,6 +64,12 @@ service.downloadObject = async (objectName, filePath) => {
     await ossClient.downloadObject(APS_BUCKET, objectName, filePath, { accessToken });
 };
 
+service.deleteObject = async (objectName) => {
+    await service.ensureBucketExists(APS_BUCKET);
+    const accessToken = await getInternalToken();
+    await ossClient.deleteObject(APS_BUCKET, objectName, { accessToken });
+};
+
 service.createSignedResource = async (objectName, access = Access.ReadWrite) => {
     await service.ensureBucketExists(APS_BUCKET);
     const accessToken = await getInternalToken();

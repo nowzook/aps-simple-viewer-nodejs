@@ -5,6 +5,7 @@ initViewer(document.getElementById('preview')).then(viewer => {
     const urn = window.location.hash?.substring(1);
     setupModelSelection(viewer, urn);
     setupModelUpload(viewer);
+    setupModelDelete(viewer);
     setupObjectEditor(viewer, () => window.location.hash?.substring(1), model => {
         setupModelSelection(viewer, model.urn);
     });
@@ -12,6 +13,7 @@ initViewer(document.getElementById('preview')).then(viewer => {
 
 async function setupModelSelection(viewer, selectedUrn) {
     const dropdown = document.getElementById('models');
+    const deleteButton = document.getElementById('delete');
     dropdown.innerHTML = '';
     try {
         const resp = await fetch('/api/models');
@@ -23,11 +25,72 @@ async function setupModelSelection(viewer, selectedUrn) {
         dropdown.onchange = () => onModelSelected(viewer, dropdown.value);
         if (dropdown.value) {
             onModelSelected(viewer, dropdown.value);
+            if (deleteButton) {
+                deleteButton.removeAttribute('disabled');
+            }
+        } else {
+            unloadCurrentModel(viewer);
+            window.location.hash = '';
+            if (deleteButton) {
+                deleteButton.setAttribute('disabled', 'true');
+            }
         }
     } catch (err) {
         alert('Could not list models. See the console for more details.');
         console.error(err);
     }
+}
+
+function unloadCurrentModel(viewer) {
+    try {
+        const models = viewer.getVisibleModels ? viewer.getVisibleModels() : [];
+        if (Array.isArray(models)) {
+            for (const model of models) {
+                viewer.unloadModel(model);
+            }
+        } else if (viewer.model) {
+            viewer.unloadModel(viewer.model);
+        }
+    } catch (err) {
+        console.error('Could not unload current model from viewer.', err);
+    }
+}
+
+function setupModelDelete(viewer) {
+    const button = document.getElementById('delete');
+    if (!button) {
+        return;
+    }
+    button.onclick = async () => {
+        const dropdown = document.getElementById('models');
+        const urn = dropdown.value;
+        if (!urn) {
+            return;
+        }
+        const modelName = dropdown.options[dropdown.selectedIndex]?.text || urn;
+        if (!window.confirm(`현재 도면 "${modelName}"을(를) 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`)) {
+            return;
+        }
+        button.setAttribute('disabled', 'true');
+        dropdown.setAttribute('disabled', 'true');
+        showNotification(`Deleting model <em>${modelName}</em>...`);
+        try {
+            const resp = await fetch(`/api/models/${encodeURIComponent(urn)}`, { method: 'DELETE' });
+            if (!resp.ok) {
+                throw new Error(await resp.text());
+            }
+            unloadCurrentModel(viewer);
+            window.location.hash = '';
+            await setupModelSelection(viewer);
+        } catch (err) {
+            alert(`Could not delete model ${modelName}. See the console for more details.`);
+            console.error(err);
+            button.removeAttribute('disabled');
+        } finally {
+            clearNotification();
+            dropdown.removeAttribute('disabled');
+        }
+    };
 }
 
 async function setupModelUpload(viewer) {
